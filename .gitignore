@@ -1,2 +1,23 @@
 cloud_assignment/
 CLOUD_ASSIGNMENT_DESCRIPTION.pdf
+
+.venv/
+__pycache__/
+*.pyc
+
+# model weights and artefacts (go to object storage / GitHub Release)
+*.safetensors
+*.bin
+*.pt
+*.pth
+models/
+training/output/
+
+# credentials
+.env
+*.key
+secrets/
+k8s/secret.yaml
+
+# large local data
+*.log
