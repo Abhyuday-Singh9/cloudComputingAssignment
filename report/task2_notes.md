@@ -52,3 +52,4 @@ These notes summarize the readings from Kim & Rush (2016), the Pythia-70M model 
    - Using greedy decoding (`temperature=0`) collapses the output distribution to a single deterministic sequence per command, discarding valid alternative slot segmentations and uncertainty information.
 4. **Constrained Training Set Size**:
    - Fine-tuning on at most 1,500 samples provides limited coverage over diverse linguistic phrasing, making out-of-distribution commands prone to slot-filling errors.
+
