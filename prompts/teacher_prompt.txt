@@ -31,3 +31,4 @@ Command: what time is it in tokyo
 JSON: {"intent": "datetime_query", "date": null, "time": null, "place": "tokyo"}
 
 Output only the JSON object, nothing else. Do not include markdown code fences, explanations, or any text before or after the JSON.
+

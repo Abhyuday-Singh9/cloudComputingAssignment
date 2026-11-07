@@ -74,3 +74,4 @@ NACL rules are evaluated sequentially in strictly ascending numerical order (low
 2. General web traffic is permitted at **Rule 110** (port 80) and **Rule 120** (port 443) from `0.0.0.0/0` with action `ALLOW`.
 
 Because `198.51.100.0/24` is a subset of the global CIDR `0.0.0.0/0`, any incoming packet from an abusive IP (e.g., `198.51.100.9` requesting port 443) matches Rule 100 first and is immediately denied. If Rule 100 were numbered higher than Rule 110/120 (e.g., Rule 200), the broad `ALLOW` rule for `0.0.0.0/0` on port 443 would match first, and the abusive traffic would be incorrectly permitted. Placing the specific `DENY` rule ahead of broader `ALLOW` rules is essential for enforcing access controls in a first-match-wins model.
+
