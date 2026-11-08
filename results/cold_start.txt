@@ -1,0 +1,33 @@
+=== Cold Start Latency Measurements (Task 4.7) ===
+Run 1: 95.0 s
+Run 2: 56.0 s
+Run 3: 51.0 s
+Median Cold Start Time: 56.0 s
+
+=== Log Evidence of S3 Model Download ===
+2026-11-08 09:14:10,450 [INFO] Downloading model from bucket='models', prefix='v1/' to '/tmp/model'...
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2026-11-08 09:14:11,135 [INFO] Downloading v1/config.json -> /tmp/model/config.json
+2026-11-08 09:14:11,151 [INFO] Downloading v1/generation_config.json -> /tmp/model/generation_config.json
+2026-11-08 09:14:11,159 [INFO] Downloading v1/model-v1.zip -> /tmp/model/model-v1.zip
+INFO:     10.42.1.1:55418 - "GET /readyz HTTP/1.1" 503 Service Unavailable
+INFO:     10.42.1.1:57712 - "GET /readyz HTTP/1.1" 503 Service Unavailable
+INFO:     10.42.1.1:57720 - "GET /readyz HTTP/1.1" 503 Service Unavailable
+INFO:     10.42.1.1:58410 - "GET /readyz HTTP/1.1" 503 Service Unavailable
+2026-11-08 09:14:27,426 [INFO] Downloading v1/model.safetensors -> /tmp/model/model.safetensors
+INFO:     10.42.1.1:58422 - "GET /readyz HTTP/1.1" 503 Service Unavailable
+INFO:     10.42.1.1:34192 - "GET /readyz HTTP/1.1" 503 Service Unavailable
+2026-11-08 09:14:41,867 [INFO] Downloading v1/model.sha256 -> /tmp/model/model.sha256
+2026-11-08 09:14:41,879 [INFO] Downloading v1/tokenizer.json -> /tmp/model/tokenizer.json
+2026-11-08 09:14:42,053 [INFO] Downloading v1/tokenizer_config.json -> /tmp/model/tokenizer_config.json
+2026-11-08 09:14:42,066 [INFO] Download from S3 completed.
+2026-11-08 09:14:42,070 [INFO] Loading tokenizer and model with PyTorch/Transformers...
+INFO:     10.42.1.1:34198 - "GET /readyz HTTP/1.1" 503 Service Unavailable
+INFO:     10.42.1.1:34666 - "GET /readyz HTTP/1.1" 503 Service Unavailable
+INFO:     10.42.1.1:34682 - "GET /readyz HTTP/1.1" 503 Service Unavailable
+The `GPTNeoXSdpaAttention` class is deprecated in favor of simply modifying the `config._attn_implementation`attribute of the `GPTNeoXAttention` class! It will be removed in v4.48
+2026-11-08 09:14:55,215 [INFO] Model loaded successfully and marked READY.
+INFO:     10.42.1.1:60076 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.42.1.1:60082 - "GET /readyz HTTP/1.1" 200 OK
+
