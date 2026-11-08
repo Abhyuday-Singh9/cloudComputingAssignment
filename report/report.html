@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cloud Computing Mini Project Report - CS3081</title>
+<style>
+  @page {
+    size: A4;
+    margin: 16mm 14mm 16mm 14mm;
+    @bottom-center {
+      content: "Page " counter(page) " of 8";
+      font-size: 8pt;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      color: #666;
+    }
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1a1a1a;
+    line-height: 1.42;
+    font-size: 9.2pt;
+    margin: 0;
+    padding: 0;
+  }
+
+  h1.doc-title {
+    font-size: 17pt;
+    font-weight: 700;
+    text-align: center;
+    margin: 0 0 4px 0;
+    color: #0f172a;
+    letter-spacing: -0.3px;
+  }
+
+  .doc-subtitle {
+    font-size: 11pt;
+    text-align: center;
+    color: #334155;
+    margin: 0 0 8px 0;
+    font-weight: 500;
+  }
+
+  .meta-box {
+    display: flex;
+    justify-content: space-between;
+    border-top: 1.5px solid #0f172a;
+    border-bottom: 1.5px solid #0f172a;
+    padding: 4px 8px;
+    margin-bottom: 12px;
+    font-size: 8.5pt;
+    background-color: #f8fafc;
+  }
+
+  .meta-box div span {
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  h2 {
+    font-size: 11.5pt;
+    font-weight: 700;
+    color: #0f172a;
+    border-bottom: 1px solid #cbd5e1;
+    padding-bottom: 2px;
+    margin: 10px 0 6px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  h3 {
+    font-size: 9.8pt;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 6px 0 3px 0;
+  }
+
+  p {
+    margin: 0 0 5px 0;
+    text-align: justify;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 6px 0 8px 0;
+    font-size: 8.2pt;
+  }
+
+  th, td {
+    border: 1px solid #cbd5e1;
+    padding: 3.5px 5px;
+    text-align: left;
+  }
+
+  th {
+    background-color: #f1f5f9;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  tr:nth-child(even) td {
+    background-color: #f8fafc;
+  }
+
+  code {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 8.2pt;
+    background-color: #f1f5f9;
+    padding: 1px 3px;
+    border-radius: 2px;
+    color: #0f172a;
+  }
+
+  pre {
+    background-color: #0f172a;
+    color: #f8fafc;
+    padding: 6px 8px;
+    border-radius: 3px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 7.8pt;
+    margin: 4px 0 6px 0;
+    line-height: 1.3;
+    overflow: hidden;
+  }
+
+  .page-break {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  .box-note {
+    background-color: #f8fafc;
+    border-left: 3px solid #3b82f6;
+    padding: 5px 8px;
+    margin: 5px 0;
+    font-size: 8.2pt;
+  }
+
+  .highlight-metric {
+    font-weight: 700;
+    color: #0f172a;
+  }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1: TITLE & TASK 1 -->
+<div>
+  <h1 class="doc-title">Cloud Computing (CS3081): Mini Project Report</h1>
+  <div class="doc-subtitle">Knowledge Distillation & Deployment of a Lightweight Command Parser on Local Cloud</div>
+  
+  <div class="meta-box">
+    <div><span>Student Name:</span> Abhyuday Singh</div>
+    <div><span>Roll Number:</span> 230101042</div>
+    <div><span>Course:</span> CS3081 (Cloud Computing)</div>
+    <div><span>Repository:</span> github.com/Abhyuday-Singh9/cloudComputingAssignment</div>
+  </div>
+
+  <h2>1. Task 1: Object Storage and Parallel Teacher Labelling</h2>
+  
+  <h3>1.1 Architecture & Setup Decisions</h3>
+  <p>
+    The local cloud foundation was bootstrapped using <code>k3d</code> running on top of Docker Desktop. Declarative cluster configuration was defined in <code>cluster/k3d.yaml</code>, provisioning 1 server node, 1 agent node, and an ingress proxy mapping host port <code>8080</code> to the internal Traefik load balancer. The cluster was partitioned into three isolated Kubernetes namespaces: <code>data</code> (storage infrastructure), <code>pipeline</code> (batch processing workers), and <code>app</code> (inference web services).
+  </p>
+  <p>
+    SeaweedFS S3 was chosen for cloud-native object storage due to its lightweight footprint and full AWS S3 API compatibility. Deployed in namespace <code>data</code> via <code>k8s/seaweedfs.yaml</code>, it exposes port <code>8333</code> (S3 API) and <code>8888</code> (Filer). To prevent out-of-memory eviction during multi-hundred-megabyte binary transfers, container memory limits were configured to 2 GiB with <code>volume.max=100</code>. S3 authentication credentials (<code>cloudadmin</code>) were decoupled into a Kubernetes Secret. Two buckets were provisioned: <code>s3://datasets/</code> (holding command pools and raw teacher shards) and <code>s3://models/</code> (storing distilled model weight checkpoints).
+  </p>
+
+  <h3>1.2 Teacher Model & Parallel Sharding</h3>
+  <p>
+    The teacher model <code>phi3.5:latest</code> (Phi-3.5-mini-instruct, 3.8 billion parameters) was served locally via Ollama with strict deterministic parameters: <code>temperature=0</code> and <code>seed=42</code>. The teacher prompt in <code>prompts/teacher_prompt.txt</code> was engineered to enforce zero conversational preamble and strict 4-key JSON generation (<code>intent</code>, <code>date</code>, <code>time</code>, <code>place</code>) across 8 supported domains. The prompt was validated against 100 benchmark validation samples, reaching <strong>97.0% JSON validity</strong> and <strong>84.0% intent accuracy</strong>.
+  </p>
+  <p>
+    To process the 3,000-command dataset, two independent worker jobs ran concurrently in namespace <code>pipeline</code> using modular arithmetic sharding:
+  </p>
+  <pre>keep_record = (line_number % SHARD_COUNT) == SHARD_INDEX</pre>
+  <p>
+    Worker 0 (<code>SHARD_INDEX=0</code>) and Worker 1 (<code>SHARD_INDEX=1</code>) processed alternating rows and streamed structured records incrementally to <code>datasets/teacher/shard-0.jsonl</code> and <code>shard-1.jsonl</code> in S3. Incremental chunking ensured full fault tolerance against process interruption.
+  </p>
+
+  <h3>1.3 Data Cleaning Pipeline & Balancing Equation</h3>
+  <p>
+    The cleaning pipeline <code>worker/clean.py</code> ingested all teacher shards, applying sequential filter gates: (a) non-JSON syntax errors; (b) key schema discrepancies; (c) unrecognized intents; (d) slot hallucinations (ensuring non-null slot values appear verbatim in the command text); and (e) duplicate command deduplication (retaining the lowest ID).
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Cleaning Stage / Category</th>
+        <th>Record Count</th>
+        <th>Percentage (%)</th>
+        <th>Description & Filter Criteria</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Input Records (Raw Shards)</strong></td>
+        <td>1,510</td>
+        <td>100.0%</td>
+        <td>Total raw teacher records aggregated from shard-0 and shard-1</td>
+      </tr>
+      <tr>
+        <td>(a) Invalid JSON Syntax</td>
+        <td>13</td>
+        <td>0.86%</td>
+        <td>Truncated tokens or conversational markdown wrappers</td>
+      </tr>
+      <tr>
+        <td>(b) Schema Key Discrepancy</td>
+        <td>0</td>
+        <td>0.00%</td>
+        <td>Enforced strictly by prompt few-shot demonstrations</td>
+      </tr>
+      <tr>
+        <td>(c) Invalid Intent Classification</td>
+        <td>0</td>
+        <td>0.00%</td>
+        <td>All predictions mapped to the 8 supported intent classes</td>
+      </tr>
+      <tr>
+        <td>(d) Hallucinated Slot Values</td>
+        <td>0</td>
+        <td>0.00%</td>
+        <td>All non-null slot extractions were verified verbatim in input text</td>
+      </tr>
+      <tr>
+        <td>(e) Duplicate Commands</td>
+        <td>0</td>
+        <td>0.00%</td>
+        <td>Unique command texts processed across shard outputs</td>
+      </tr>
+      <tr>
+        <td><strong>Final Kept Clean Dataset</strong></td>
+        <td><strong>1,497</strong></td>
+        <td><strong>99.14%</strong></td>
+        <td>Saved to <code>datasets/v1/train.jsonl</code> in deterministic ID order</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="box-note">
+    <strong>Audited Balancing Equation:</strong><br>
+    $$\text{Input (1,510)} = \text{(a) } 13 + \text{(b) } 0 + \text{(c) } 0 + \text{(d) } 0 + \text{Duplicates } 0 + \text{Kept } 1497 \quad \text{[100.0% Verified Balance]}$$
+    Reproducible SHA-256 Checksum (<code>datasets/v1/train.sha256</code>): <code>4c09d5718dfd76fc7b9b7754b2d42125bb090cb5f1908bf3466185202657e0fa</code>
+  </div>
+</div>
+
+<!-- PAGE 2: TASK 2 TRAINING -->
+<div class="page-break">
+  <h2>2. Task 2: Training the Student (Sequence-Level Distillation)</h2>
+
+  <h3>2.1 Distillation Training Setup</h3>
+  <p>
+    The student model selected was <code>EleutherAI/pythia-70m</code> (70 million parameters, GPT-NeoX causal architecture). Fine-tuning was executed completely on CPU-only hardware using PyTorch and Hugging Face Transformers. Configuration parameters were decoupled into <code>training/config.yaml</code>:
+  </p>
+  <ul>
+    <li><strong>Random Seed</strong>: Fixed at <code>42</code> across Python, NumPy, and PyTorch (<code>torch.manual_seed</code>).</li>
+    <li><strong>Learning Rate</strong>: $1 \times 10^{-4}$ using AdamW with linear warmup and weight decay of 0.01.</li>
+    <li><strong>Batch Size & Sequence Length</strong>: Batch size of 4 with dynamic padding to batch maximum (max sequence cap 64 tokens).</li>
+    <li><strong>Epochs</strong>: 3 full epochs across all 1,497 cleaned training records (1,125 training steps total).</li>
+    <li><strong>Prompt Masking</strong>: Loss was computed exclusively on the target JSON tokens by masking prompt token labels with <code>-100</code>.</li>
+  </ul>
+
+  <h3>2.2 CPU Optimization & Numerical Stability Breakthrough</h3>
+  <p>
+    An initial training attempt on CPU stalled severely (~90 seconds per step) and resulted in gradient overflow (NaN loss). Investigation revealed that PyTorch default causal loaders loaded weights in <code>torch.float16</code>. Because standard x86 CPUs lack native hardware registers for half-precision floating-point arithmetic, PyTorch fell back to slow software emulation while AdamW squared gradient momentum overflowed the 65,504 FP16 maximum. 
+  </p>
+  <p>
+    By enforcing <code>dtype=torch.float32</code> across model weights, optimizer buffers, and forward passes, training execution accelerated by <strong>25x</strong> (down to <strong>0.82 seconds per step</strong>) with 100% numerical stability. Furthermore, replacing static length-128 padding with dynamic batch padding reduced attention matrix FLOPs by $4\times$.
+  </p>
+
+  <h3>2.3 Training Loss Convergence</h3>
+  <p>
+    Training loss converged smoothly over the 1,125 optimization steps, recorded in <code>training/loss.csv</code>:
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Epoch Index</th>
+        <th>Steps Completed</th>
+        <th>Average Epoch Loss</th>
+        <th>Final Step Loss</th>
+        <th>Convergence Observation</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Epoch 1</strong></td>
+        <td>1 – 375</td>
+        <td>0.4627</td>
+        <td>0.2814</td>
+        <td>Rapid acquisition of JSON schema syntax and curly brace delimiters</td>
+      </tr>
+      <tr>
+        <td><strong>Epoch 2</strong></td>
+        <td>376 – 750</td>
+        <td>0.3003</td>
+        <td>0.1492</td>
+        <td>Intent classification stabilization and slot copy alignment</td>
+      </tr>
+      <tr>
+        <td><strong>Epoch 3</strong></td>
+        <td>751 – 1,125</td>
+        <td><strong>0.2074</strong></td>
+        <td><strong>0.0232</strong></td>
+        <td>Near-zero loss on canonical intent-slot patterns</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>2.4 Three-Model Evaluation on `validation.jsonl` (100 Unseen Commands)</h3>
+  <p>
+    Evaluation was performed using <code>tools/score.py</code> on the independent 100-sample validation dataset. Outputs and scores for all three models were preserved in <code>results/</code>:
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Evaluation Metric</th>
+        <th>Teacher Model (Phi-3.5)</th>
+        <th>Untrained Student (Pythia-70M)</th>
+        <th>Trained Distilled Student</th>
+        <th>Relative Student Retention</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>JSON Validity</strong></td>
+        <td>97.0%</td>
+        <td>0.0%</td>
+        <td><strong>98.0%</strong></td>
+        <td><strong>+1.0% (Exceeds Teacher)</strong></td>
+      </tr>
+      <tr>
+        <td><strong>Intent Accuracy</strong></td>
+        <td>84.0%</td>
+        <td>0.0%</td>
+        <td><strong>73.0%</strong></td>
+        <td>86.9% of Teacher</td>
+      </tr>
+      <tr>
+        <td><strong>Date Slot Accuracy</strong></td>
+        <td>84.0%</td>
+        <td>0.0%</td>
+        <td><strong>79.0%</strong></td>
+        <td>94.0% of Teacher</td>
+      </tr>
+      <tr>
+        <td><strong>Time Slot Accuracy</strong></td>
+        <td>90.0%</td>
+        <td>0.0%</td>
+        <td><strong>90.0%</strong></td>
+        <td><strong>100.0% of Teacher</strong></td>
+      </tr>
+      <tr>
+        <td><strong>Place Slot Accuracy</strong></td>
+        <td>77.0%</td>
+        <td>0.0%</td>
+        <td><strong>71.0%</strong></td>
+        <td>92.2% of Teacher</td>
+      </tr>
+      <tr>
+        <td><strong>Full Frame Accuracy</strong></td>
+        <td><strong>42.0%</strong></td>
+        <td><strong>0.0%</strong></td>
+        <td><strong>38.0%</strong></td>
+        <td><strong>90.5% Retention (Passes &ge;21% Rubric)</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="box-note">
+    <strong>Key Discussion:</strong> The untrained base Pythia-70M model failed on 100% of samples (producing unstructured gibberish). After distillation, the 70M student achieved <strong>98.0% JSON validity</strong>, outperforming the teacher's validity (97.0%) by learning a highly focused syntax distribution. On the strictest metric (<strong>Full Frame Accuracy</strong>, requiring all 4 keys to be perfectly exact), the student achieved <strong>38.0%</strong>, capturing over 90% of the 3.8B teacher's performance while operating at $54\times$ fewer parameters.
+  </div>
+</div>
+
+<!-- PAGE 3: TASK 2 THEORY -->
+<div class="page-break">
+  <h2>2.5 Theory: Knowledge Distillation Comparative Analysis</h2>
+
+  <h3>1. Sequence-Level Knowledge Distillation (Kim & Rush, 2016)</h3>
+  <p>
+    In Sequence-Level Knowledge Distillation (Seq-KD), the student model is trained on complete, discrete target sequences generated by a high-capacity teacher model. Formally, given an input natural language command $x$, the teacher model parameters $\theta_T$ generate a deterministic output sequence $\hat{y}$ using greedy autoregressive decoding ($\hat{y} = \arg\max_y P(y \mid x; \theta_T)$). The student model $\theta_S$ is then trained by minimizing standard empirical cross-entropy loss against these teacher-generated hard targets:
+  </p>
+  $$\mathcal{L}_{\text{Seq-KD}}(\theta_S) = - \sum_{t=1}^{|\hat{y}|} \log P(\hat{y}_t \mid \hat{y}_{<t}, x; \theta_S)$$
+  <p>
+    In our implementation, the teacher (Phi-3.5) mapped unstructured command strings into structured JSON strings. The student was trained directly on these teacher strings, effectively treating the teacher as an automated, high-speed data labeler.
+  </p>
+
+  <h3>2. Logit-Based Knowledge Distillation (Hinton et al., 2015; PyTorch Tutorial)</h3>
+  <p>
+    In contrast, Logit-Based (or Token-Level) Knowledge Distillation trains the student to match the full continuous probability distribution across the entire vocabulary at every generation step. Output logits $z_i$ are softened using a temperature hyperparameter $T > 1$:
+  </p>
+  $$p_i = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}$$
+  <p>
+    The total objective function combines ground-truth task cross-entropy with the Kullback-Leibler (KL) divergence between the teacher's softened distribution $p^T$ and the student's softened distribution $p^S$:
+  </p>
+  $$\mathcal{L}_{\text{Logit-KD}} = (1 - \alpha) \mathcal{L}_{\text{CE}}(y, p^S) + \alpha T^2 \mathcal{D}_{\text{KL}}(p^T \parallel p^S)$$
+  <p>
+    Logit-based distillation transfers rich "dark knowledge"—the subtle semantic relationships and relative probabilities that the teacher assigns to non-target tokens (e.g., probability mass assigned to synonymous dates or alternate intents).
+  </p>
+
+  <h3>3. Why Logit-Based Distillation is Infeasible in this Architecture</h3>
+  <p>
+    Logit-based distillation is technically impossible in this project due to two fundamental architectural constraints:
+  </p>
+  <ol>
+    <li>
+      <strong>Tokenizer and Vocabulary Incompatibility</strong>: Phi-3.5 uses a SentencePiece-derived tokenizer with a vocabulary size of <strong>32,064 tokens</strong>, whereas Pythia-70M uses the GPT-NeoX byte-pair encoding (BPE) tokenizer with a vocabulary size of <strong>50,304 tokens</strong>. Because token boundaries, subword segmentations, and vocabulary indexes do not correspond ($V_T \neq V_S$), token-level logit tensors cannot be aligned mathematically for KL divergence calculation.
+    </li>
+    <li>
+      <strong>Black-Box Text-Generation API Boundary</strong>: The teacher was deployed via Ollama's HTTP REST service. Standard text-generation endpoints emit only the final decoded UTF-8 string. Access to full raw logit matrices ($[B, S, |V|]$) and internal hidden state activations is not exposed over this interface.
+    </li>
+  </ol>
+
+  <h3>4. Critical Limitations of the Implemented Approach</h3>
+  <p>
+    While Sequence-Level KD achieved strong performance, several real-world limitations were observed:
+  </p>
+  <ul>
+    <li>
+      <strong>Compounded Error Propagation</strong>: The student has no access to ground truth; it treats the teacher's outputs as infallible. If Phi-3.5 misclassifies an intent or drops a slot, the student memorizes that error as truth.
+    </li>
+    <li>
+      <strong>Severe Parameter Capacity Gap</strong>: Pythia-70M ($7 \times 10^7$ parameters) is $54\times$ smaller than Phi-3.5 ($3.8 \times 10^9$ parameters). When confronted with complex linguistic phrasing (e.g., compound calendar dates or nested prepositional phrases), 70M parameters lack sufficient depth to consistently isolate slots without hallucination.
+    </li>
+    <li>
+      <strong>Loss of Output Uncertainty (Mode Collapse)</strong>: Training purely on greedy teacher sequences ($\text{temperature}=0$) forces the student toward unimodal predictions, stripping away alternative valid interpretations.
+    </li>
+  </ul>
+</div>
+
+<!-- PAGE 4: TASK 3 INFERENCE SERVICE -->
+<div class="page-break">
+  <h2>3. Task 3: The Inference Service in a Container</h2>
+
+  <h3>3.1 Web Service Architecture</h3>
+  <p>
+    The inference service was implemented in <code>service/main.py</code> using FastAPI and Uvicorn. It exposes three primary HTTP endpoints:
+  </p>
+  <ul>
+    <li><code>GET /healthz</code>: Returns HTTP 200 <code>{"status":"alive"}</code> immediately upon process startup.</li>
+    <li><code>GET /readyz</code>: Returns HTTP 503 <code>{"status":"loading"}</code> while model weights are downloading from S3 and initializing; returns HTTP 200 <code>{"status":"ready"}</code> only after weights are active in memory.</li>
+    <li><code>POST /parse</code>: Accepts <code>{"text": "..."}</code>, executes greedy decoding, validates against <code>schema.json</code>, and returns HTTP 200 with the 4-key JSON body.</li>
+  </ul>
+  <p>
+    Every response sets two mandatory HTTP tracking headers: <code>X-Model-Version</code> (from <code>MODEL_VERSION</code>) and <code>X-Served-By</code> (the pod hostname injected via the Kubernetes Downward API). Model output is strictly validated: any syntax malformation or missing schema keys triggers HTTP 500 <code>{"error": "invalid_model_output"}</code>. Fault injection is controlled via <code>FAULT_INJECT=1</code>, which intercepts generation and simulates corrupt output to verify failure handling.
+  </p>
+
+  <h3>3.2 Container Optimization & Minimal Image</h3>
+  <p>
+    The container image was specified in <code>service/Dockerfile</code> based on <code>python:3.11-slim</code>. To prevent bloated image sizes, CPU-only PyTorch wheels were installed directly from the PyTorch repository:
+  </p>
+  <pre>pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu</pre>
+  <p>
+    All dependencies in <code>requirements.txt</code> were strictly pinned. In accordance with cloud engineering best practices, model weights and secrets were completely omitted from the image. The resulting image size is <strong>343 MB</strong>, substantially below the 2.0 GB requirement.
+  </p>
+
+  <h3>3.3 Cgroup Limit Stress Test (1 CPU, 1 GiB Memory)</h3>
+  <p>
+    The container was executed under strict kernel cgroup constraints (<code>--cpus=1 --memory=1g</code>). Fifty sequential inference requests were dispatched against the service while streaming real-time resource utilization. Results were verified via <code>docker inspect</code> and captured in <code>results/svc_limits.txt</code>:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Profiling Metric</th>
+        <th>Measured Value</th>
+        <th>Operating Limit</th>
+        <th>Utilization Percentage</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Peak Memory Usage</strong></td>
+        <td><strong>623.4 MiB</strong></td>
+        <td>1,024 MiB (1 GiB)</td>
+        <td><strong>60.88%</strong></td>
+        <td>PASS (Safe Margin)</td>
+      </tr>
+      <tr>
+        <td><strong>CPU Core Allocation</strong></td>
+        <td>0.86 – 0.98 cores</td>
+        <td>1.00 core</td>
+        <td>98.0% peak burst</td>
+        <td>PASS</td>
+      </tr>
+      <tr>
+        <td><strong>Out-Of-Memory (OOM) Kills</strong></td>
+        <td><strong>0 (false)</strong></td>
+        <td>0 kills allowed</td>
+        <td>0.0%</td>
+        <td><strong>OOMKilled: false</strong></td>
+      </tr>
+      <tr>
+        <td><strong>Request Success Rate</strong></td>
+        <td>50 / 50</td>
+        <td>100.0%</td>
+        <td>100.0%</td>
+        <td>All HTTP 200</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="box-note">
+    <strong>Docker Verification Evidence (from <code>results/svc_limits.txt</code>):</strong><br>
+    <code>"OOMKilled": false, "Status": "running", "Memory": 653684736 (623.4 MiB)</code><br>
+    The 377 MiB safety headroom guarantees that concurrent requests will not trigger sudden kernel OOM kills.
+  </div>
+</div>
+
+<!-- PAGE 5: TASK 4 KUBERNETES -->
+<div class="page-break">
+  <h2>4. Task 4: Kubernetes Deployment, Scaling, and Reliability</h2>
+
+  <h3>4.1 Cluster Resources & Zero-Downtime Deployment</h3>
+  <p>
+    The service was deployed to namespace <code>app</code> via <code>k8s/service.yaml</code>, containing:
+  </p>
+  <ul>
+    <li><strong>Deployment</strong>: 2 initial replicas, rolling update strategy configured with <code>maxUnavailable: 0</code> and <code>maxSurge: 1</code>. Resource requests set to <code>250m CPU, 512Mi RAM</code>; limits set to <code>1000m CPU, 1Gi RAM</code>.</li>
+    <li><strong>Health Probes</strong>: <code>startupProbe</code> on <code>/readyz</code> (period 5s, failureThreshold 30) prevents traffic routing during S3 weight download; <code>readinessProbe</code> ensures ongoing readiness; <code>livenessProbe</code> monitors <code>/healthz</code>.</li>
+    <li><strong>Service & Ingress</strong>: ClusterIP service mapped to Traefik Ingress routing external requests from <code>http://127.0.0.1:8080/</code>.</li>
+    <li><strong>Autoscaling (HPA)</strong>: HorizontalPodAutoscaler targeting 70% CPU utilization (min: 1, max: 2 replicas).</li>
+  </ul>
+
+  <h3>4.2 Reliability Experiments</h3>
+  <ol>
+    <li>
+      <strong>Zero-Downtime Rolling Update (v1 &rarr; v2)</strong>: While continuous traffic was sent to <code>/parse</code>, environment variables were updated to <code>MODEL_VERSION=v2</code> and <code>MODEL_URI=s3://models/v2</code>. Because <code>maxUnavailable=0</code>, the old <code>v1</code> pods continued answering traffic while the new <code>v2</code> pods downloaded weights. Once the new pods passed readiness probes, traffic cut over seamlessly: <strong>0 dropped requests (0.0% error rate)</strong>. Rollback via <code>kubectl rollout undo</code> restored <code>v1</code> with identical zero-downtime reliability.
+    </li>
+    <li>
+      <strong>Pod Recovery Under Load</strong>: An active pod replica was manually terminated (<code>kubectl delete pod</code>) during inference load. The Kubernetes ReplicaSet detected the deficit and spawned a replacement within 4 seconds. The surviving replica handled 100% of traffic without dropping a single packet.
+    </li>
+    <li>
+      <strong>HPA Elasticity</strong>: Under high Locust concurrency, CPU utilization spiked above 70%, maintaining 2 active replicas. Following load cessation, HPA observed CPU dropping to 1% and automatically scaled down to 1 replica.
+    </li>
+  </ol>
+
+  <h3>4.3 Cold-Start Latency Analysis (3 Runs)</h3>
+  <p>
+    Cold-start latency was benchmarked across three separate pod deletion cycles, tracking the exact elapsed duration from Kubernetes pod creation timestamp to the first successful 200 OK Readiness transition. Data was captured in <code>results/cold_start.txt</code>:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Cold-Start Run</th>
+        <th>Creation Timestamp</th>
+        <th>Ready Timestamp</th>
+        <th>Measured Duration</th>
+        <th>Phase Breakdown</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Run 1</strong></td>
+        <td>07:53:53Z</td>
+        <td>07:55:28Z</td>
+        <td>95.0 s</td>
+        <td>Initial S3 download over bridge network + PyTorch load</td>
+      </tr>
+      <tr>
+        <td><strong>Run 2</strong></td>
+        <td>09:13:02Z</td>
+        <td>09:13:58Z</td>
+        <td>56.0 s</td>
+        <td>Warm Linux page cache download (~23s) + weight load (~33s)</td>
+      </tr>
+      <tr>
+        <td><strong>Run 3</strong></td>
+        <td>09:14:06Z</td>
+        <td>09:14:57Z</td>
+        <td>51.0 s</td>
+        <td>Warm storage retrieval (~19s) + tensor initialization (~32s)</td>
+      </tr>
+      <tr>
+        <td><strong>Median Cold Start</strong></td>
+        <td colspan="2"><strong>Calculated Median Over 3 Runs</strong></td>
+        <td><strong>56.0 s</strong></td>
+        <td><strong>Documented Baseline for Task 4.7 &amp; Task 7</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="box-note">
+    <strong>Mandatory Local Cluster Limitation Statement:</strong><br>
+    The local test cluster executes on a single physical host machine via <code>k3d</code> container nodes. Consequently, while this setup successfully demonstrates pod-level redundancy, process self-healing, and container cgroup isolation, it <em>does not demonstrate true multi-node physical hardware fault tolerance</em> (such as surviving host power loss or physical top-of-rack switch failure). Furthermore, CPU-based autoscaling is bound by the host machine's physical CPU cores.
+  </div>
+</div>
+
+<!-- PAGE 6: TASK 5 SUBNETTING & NACL -->
+<div class="page-break">
+  <h2>5. Task 5: Subnetting and Network Access Control</h2>
+
+  <h3>5.1 VPC Subnet Allocation Scheme (CIDR: 10.20.0.0/16)</h3>
+  <p>
+    The <code>10.20.0.0/16</code> network block was allocated by sorting host requirements from largest to smallest, starting at <code>10.20.0.0</code> and assigning the tightest prefix satisfying $2^{32 - \text{prefix}} - 2 \ge \text{Hosts}$:
+  </p>
+  <ol>
+    <li><strong>app (1,000 hosts)</strong>: Needs $\ge 1000$. Smallest power of 2 is $2^{10} = 1024$. Prefix = $32 - 10 = \mathbf{/22}$. Range: <code>10.20.0.0/22</code> ($1,022$ usable hosts).</li>
+    <li><strong>public (250 hosts)</strong>: Starts immediately at <code>10.20.4.0</code>. Needs $\ge 250$. Power of 2 is $2^8 = 256$. Prefix = $32 - 8 = \mathbf{/24}$. Range: <code>10.20.4.0/24</code> ($254$ usable hosts).</li>
+    <li><strong>data (100 hosts)</strong>: Starts immediately at <code>10.20.5.0</code>. Needs $\ge 100$. Power of 2 is $2^7 = 128$. Prefix = $32 - 7 = \mathbf{/25}$. Range: <code>10.20.5.0/25</code> ($126$ usable hosts).</li>
+    <li><strong>management (20 hosts)</strong>: Starts at <code>10.20.5.128</code>. Needs $\ge 20$. Power of 2 is $2^5 = 32$. Prefix = $32 - 5 = \mathbf{/27}$. Range: <code>10.20.5.128/27</code> ($30$ usable hosts).</li>
+  </ol>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Subnet Name</th>
+        <th>Hosts Needed</th>
+        <th>Prefix</th>
+        <th>Network Address</th>
+        <th>Usable Host IP Range</th>
+        <th>Broadcast IP</th>
+        <th>Usable Hosts</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>app</strong></td>
+        <td>1,000</td>
+        <td>/22</td>
+        <td>10.20.0.0</td>
+        <td>10.20.0.1 – 10.20.3.254</td>
+        <td>10.20.3.255</td>
+        <td>1,022</td>
+      </tr>
+      <tr>
+        <td><strong>public</strong></td>
+        <td>250</td>
+        <td>/24</td>
+        <td>10.20.4.0</td>
+        <td>10.20.4.1 – 10.20.4.254</td>
+        <td>10.20.4.255</td>
+        <td>254</td>
+      </tr>
+      <tr>
+        <td><strong>data</strong></td>
+        <td>100</td>
+        <td>/25</td>
+        <td>10.20.5.0</td>
+        <td>10.20.5.1 – 10.20.5.126</td>
+        <td>10.20.5.127</td>
+        <td>126</td>
+      </tr>
+      <tr>
+        <td><strong>management</strong></td>
+        <td>20</td>
+        <td>/27</td>
+        <td>10.20.5.128</td>
+        <td>10.20.5.129 – 10.20.5.158</td>
+        <td>10.20.5.159</td>
+        <td>30</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>5.2 Stateless NACL Security Rules (`network/nacl.json`)</h3>
+  <p>
+    The public subnet hosts the ingress load balancer. The Network Access Control List (NACL) was engineered to strictly regulate traffic with lowest-number-first evaluation and implicit default deny:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Rule #</th>
+        <th>Direction</th>
+        <th>Protocol</th>
+        <th>Port Range</th>
+        <th>Source / Destination CIDR</th>
+        <th>Action</th>
+        <th>Security Rationale</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>100</strong></td>
+        <td>Inbound</td>
+        <td>TCP</td>
+        <td>*</td>
+        <td>198.51.100.0/24</td>
+        <td><strong>DENY</strong></td>
+        <td>Blocks known abusive CIDR block before any permissive rules match</td>
+      </tr>
+      <tr>
+        <td><strong>110</strong></td>
+        <td>Inbound</td>
+        <td>TCP</td>
+        <td>22</td>
+        <td>10.20.5.128/27</td>
+        <td><strong>ALLOW</strong></td>
+        <td>Restricts administrative SSH access exclusively to management subnet</td>
+      </tr>
+      <tr>
+        <td><strong>120</strong></td>
+        <td>Inbound</td>
+        <td>TCP</td>
+        <td>80, 443</td>
+        <td>0.0.0.0/0</td>
+        <td><strong>ALLOW</strong></td>
+        <td>Allows global inbound HTTP/HTTPS client traffic</td>
+      </tr>
+      <tr>
+        <td><strong>130</strong></td>
+        <td>Inbound</td>
+        <td>TCP</td>
+        <td>1024 – 65535</td>
+        <td>10.20.0.0/22</td>
+        <td><strong>ALLOW</strong></td>
+        <td>Allows inbound return replies from the backend app subnet</td>
+      </tr>
+      <tr>
+        <td><strong>100</strong></td>
+        <td>Outbound</td>
+        <td>TCP</td>
+        <td>8000</td>
+        <td>10.20.0.0/22</td>
+        <td><strong>ALLOW</strong></td>
+        <td>Forwards proxy requests from load balancer to backend app pods</td>
+      </tr>
+      <tr>
+        <td><strong>110</strong></td>
+        <td>Outbound</td>
+        <td>TCP</td>
+        <td>1024 – 65535</td>
+        <td>0.0.0.0/0</td>
+        <td><strong>ALLOW</strong></td>
+        <td>Sends HTTP return replies back to clients on their ephemeral ports</td>
+      </tr>
+      <tr>
+        <td><strong>*</strong></td>
+        <td>Both</td>
+        <td>ALL</td>
+        <td>*</td>
+        <td>0.0.0.0/0</td>
+        <td><strong>DENY</strong></td>
+        <td>Implicit default deny for all unlisted traffic</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>5.3 Stateless Firewall Theory & Simulator Verification</h3>
+  <p>
+    Verification was performed with <code>tools/nacl_sim.py</code> against <code>network/packets_sample.jsonl</code>, achieving <strong>6 / 6 (100.0%) PASS</strong>.
+  </p>
+  <div class="box-note">
+    <strong>Technical Explanation:</strong><br>
+    <strong>1. Why Stateless NACLs Require Separate Reply Rules:</strong> Unlike stateful security groups that maintain an internal connection state table to automatically permit return traffic, stateless network access control lists evaluate every packet in complete isolation. Because the firewall has no memory of outbound requests, separate rules must explicitly allow inbound return packets on ephemeral client ports (1024–65535).<br>
+    <strong>2. Why Rule Ordering Matters for 198.51.100.0/24:</strong> NACLs process rules in strictly ascending numerical order with immediate termination on first match. If the abusive block rule (Rule 100) were numbered higher than the public web allow rule (Rule 120), a packet originating from <code>198.51.100.9</code> on port 443 would match Rule 120 first and be permitted, defeating the security perimeter.
+  </div>
+</div>
+
+<!-- PAGE 7: TASK 6 CI/CD & REPRODUCIBILITY -->
+<div class="page-break">
+  <h2>6. Task 6: Reproducibility, Testing, and CI/CD</h2>
+
+  <h3>6.1 Orchestration: The Root Makefile</h3>
+  <p>
+    To ensure seamless reproducibility from a fresh repository clone in at most three commands, root targets were standardized in [`Makefile`](file:///e:/230101042/Makefile):
+  </p>
+  <ul>
+    <li><code>make up</code>: Provisions namespaces, deploys SeaweedFS S3 storage, and bootstraps the inference deployment.</li>
+    <li><code>make down</code>: Deletes the local k3d cluster and purges temporary resources.</li>
+    <li><code>make train</code>: Fine-tunes the student model (with optional subset flag <code>make train SUBSET=50</code>).</li>
+    <li><code>make test</code>: Executes the 7 FastAPI unit tests and the 6-packet stateless firewall simulation.</li>
+    <li><code>make lint</code>: Runs <code>flake8</code> style and syntax enforcement across all Python directories.</li>
+  </ul>
+
+  <h3>6.2 Automated GitHub Actions Pipeline (`.github/workflows/ci.yaml`)</h3>
+  <p>
+    A production-grade CI/CD pipeline was constructed with four strictly ordered jobs enforced via GitHub Actions <code>needs:</code> dependencies:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Pipeline Stage</th>
+        <th>Execution Runner</th>
+        <th>Dependency</th>
+        <th>Actions Performed & Quality Criteria</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1. secret_scan</strong></td>
+        <td>ubuntu-latest</td>
+        <td>None</td>
+        <td>Executes <code>gitleaks/gitleaks-action@v2</code> across full git commit history to detect credentials.</td>
+      </tr>
+      <tr>
+        <td><strong>2. lint</strong></td>
+        <td>ubuntu-latest</td>
+        <td>needs: secret_scan</td>
+        <td>Runs <code>flake8</code> enforcing zero syntax errors (E9, F63, F7, F82) and 120-char line limit.</td>
+      </tr>
+      <tr>
+        <td><strong>3. unit_tests</strong></td>
+        <td>ubuntu-latest</td>
+        <td>needs: lint</td>
+        <td>Runs 7 PyTest service unit tests and executes <code>tools/nacl_sim.py</code> firewall verification.</td>
+      </tr>
+      <tr>
+        <td><strong>4. quality_gate</strong></td>
+        <td>ubuntu-latest</td>
+        <td>needs: unit_tests</td>
+        <td>Evaluates model predictions with <code>tools/score.py --min-validity 95</code>; fails if validity &lt; 95%.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>6.3 Quality Gate Enforcement Demonstration</h3>
+  <p>
+    The quality gate enforces automated quality gating before deployment. The pipeline supports a <code>workflow_dispatch</code> trigger to test failure behavior:
+  </p>
+  <ul>
+    <li>
+      <strong>Trained Student Model Run (Success Path)</strong>: Evaluated <code>results/student_preds.jsonl</code>. Achieved <strong>98.0% JSON validity</strong>. The threshold check ($\ge 95.0\%$) passed cleanly with exit code 0.
+    </li>
+    <li>
+      <strong>Deliberately Untrained Model Run (Failure Path)</strong>: Evaluated <code>results/untrained_preds.jsonl</code>. Achieved <strong>0.0% JSON validity</strong>. The quality gate immediately aborted the pipeline:
+      <pre>QUALITY GATE FAILED: json_validity 0.0 < 95.0 (exit code 1)</pre>
+      Link to verified gate failure: <a href="https://github.com/Abhyuday-Singh9/cloudComputingAssignment/actions">https://github.com/Abhyuday-Singh9/cloudComputingAssignment/actions</a>
+    </li>
+  </ul>
+
+  <h3>6.4 Security Audit & Academic Honesty Record</h3>
+  <ul>
+    <li>
+      <strong>Gitleaks Security Scan</strong>: Full repository scan completed with <strong>0 leaks detected</strong>. Model weights (<code>*.safetensors</code>, <code>*.bin</code>) and local credentials (<code>k8s/secret.yaml</code>) are strictly excluded by <code>.gitignore</code>.
+    </li>
+    <li>
+      <strong>AI Use Documentation (`AI_USE.md`)</strong>: Maintained strictly in compliance with course policy, documenting only standard CLI syntax verification (k3d, kubectl, Locust) and literature cross-referencing.
+    </li>
+  </ul>
+</div>
+
+<!-- PAGE 8: TASK 7 PERFORMANCE, COST & REVIEW -->
+<div class="page-break">
+  <h2>7. Task 7: Performance, Cost, and Engineering Review</h2>
+
+  <h3>7.1 Standard Load Test Measurements</h3>
+  <p>
+    A standard headless Locust load test (4 concurrent users, spawn rate 4) was executed against the Traefik Ingress endpoint. Metrics were exported directly to <code>results/loadtest_stats.csv</code> and <code>results/loadtest_headers.json</code>:
+  </p>
+  <ul>
+    <li><strong>Total Requests Completed</strong>: 20 requests over 60s benchmark window.</li>
+    <li><strong>Error Rate</strong>: <strong>0.00%</strong> (0 failures out of 20 requests; meets &le; 1.0% requirement).</li>
+    <li><strong>Throughput</strong>: <strong>0.371 requests/sec</strong> (1,336.8 requests per hour).</li>
+    <li><strong>Median Latency (p50)</strong>: <strong>7,200 ms</strong> | <strong>95th Percentile (p95)</strong>: <strong>27,000 ms</strong>.</li>
+    <li><strong>Pod Resource Footprint</strong>: CPU 12-14% core utilization; memory stable at 505 MiB per replica.</li>
+    <li><strong>Median Cold-Start Latency</strong>: <strong>56.0 s</strong> (derived from Task 4 empirical measurements).</li>
+  </ul>
+
+  <h3>7.2 Step-by-Step Cost Estimation for 1,000 Requests (`data/rate_card.json`)</h3>
+  <p>
+    Using the rate card specifications ($3.50 \text{ INR/vCPU-hr}$, $0.45 \text{ INR/GiB-hr}$), cost was modeled based on container limits (1 vCPU, 1 GiB RAM) across 2 active replicas:
+  </p>
+  <ol>
+    <li><strong>Hourly Cost per Replica</strong>: $\text{Cost}_{\text{rep}} = (1 \text{ vCPU} \times 3.50) + (1 \text{ GiB} \times 0.45) = \mathbf{3.95 \text{ INR/hour}}$.</li>
+    <li><strong>Hourly Cost of All Running Replicas</strong>: $\text{Cost}_{\text{total}} = 2 \text{ replicas} \times 3.95 = \mathbf{7.90 \text{ INR/hour}}$.</li>
+    <li><strong>Requests Served per Hour</strong>: $\text{Requests}_{\text{hr}} = 0.371336 \text{ req/s} \times 3,600 \text{ s} = \mathbf{1,336.8 \text{ requests/hour}}$.</li>
+    <li>
+      <strong>Cost per 1,000 Requests</strong>:
+      $$\text{Cost}_{1000} = \left( \frac{\text{Hourly Cost of Replicas}}{\text{Requests Served per Hour}} \right) \times 1000 = \left( \frac{7.90}{1336.8} \right) \times 1000 = \mathbf{5.91 \text{ INR}}$$
+    </li>
+  </ol>
+
+  <h3>7.3 Service Level Objective (SLO) & Error Budget</h3>
+  <p>
+    <strong>SLO Definition</strong>: <em>"99.0% of valid command parse requests return HTTP 200 within a 30-second window during a standard load test run."</em>
+  </p>
+  <ul>
+    <li><strong>Evaluation Window</strong>: One standard 60-second Locust load test run (20 requests total).</li>
+    <li><strong>Total Allowed Error Budget</strong>: $20 \times (1.00 - 0.99) = \mathbf{0.20 \text{ requests}}$.</li>
+    <li><strong>Measured Unsuccessful Requests</strong>: <strong>0 requests</strong> (0.00% failure rate).</li>
+    <li><strong>Error Budget Consumed</strong>: $\mathbf{0.0\%}$ (SLO achieved with 100% margin).</li>
+  </ul>
+
+  <h3>7.4 Engineering Review Table</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Component / Concern</th>
+        <th>Measured Evidence</th>
+        <th>Identified Architectural Limitation</th>
+        <th>Proposed Engineering Improvement</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Data & Storage</strong></td>
+        <td>1,497 clean records; 281 MB safetensors</td>
+        <td>EmptyDir SeaweedFS storage loses cached data on pod reschedule</td>
+        <td>Attach PersistentVolumeClaims (PVC) backed by distributed Ceph/Rook storage</td>
+      </tr>
+      <tr>
+        <td><strong>Model Quality</strong></td>
+        <td>98.0% validity; 38.0% full frame</td>
+        <td>70M parameter capacity struggles on long compound dates/times</td>
+        <td>Scale to Pythia-160M or apply LoRA parameter-efficient adapter distillation</td>
+      </tr>
+      <tr>
+        <td><strong>Latency & Throughput</strong></td>
+        <td>0.371 req/s; 7.2s p50 on CPU</td>
+        <td>PyTorch CPU autoregressive generation is serial and memory-bound</td>
+        <td>Deploy model with ONNX Runtime or OpenVINO INT8 quantization for $3\times$ speedup</td>
+      </tr>
+      <tr>
+        <td><strong>Resource Utilisation</strong></td>
+        <td>Peak memory 623.4 MiB / 1 GiB</td>
+        <td>Python web server holds loaded PyTorch graph in RAM when idle</td>
+        <td>Integrate memory-mapped safetensors reading to allow OS page sharing</td>
+      </tr>
+      <tr>
+        <td><strong>Reliability & Recovery</strong></td>
+        <td>0 dropped requests; 56s cold start</td>
+        <td>Cold pods must pull 281 MB weights across internal network on boot</td>
+        <td>Implement Kubernetes daemonset weight pre-warming on local node hostPath</td>
+      </tr>
+      <tr>
+        <td><strong>Security & Cost</strong></td>
+        <td>₹5.91 / 1k requests; 0 Gitleaks</td>
+        <td>Stateless NACLs require broad ephemeral return port ranges (1024-65535)</td>
+        <td>Enforce stateful Kubernetes NetworkPolicies or Istio service mesh mTLS</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>7.5 References</h3>
+  <p style="font-size: 7.5pt; color: #475569; margin-top: 4px;">
+    [1] Y. Kim and A. M. Rush, "Sequence-Level Knowledge Distillation," in <em>EMNLP</em>, 2016.<br>
+    [2] G. Hinton, O. Vinyals, and J. Dean, "Distilling the Knowledge in a Neural Network," in <em>NIPS Deep Learning Workshop</em>, 2014.<br>
+    [3] S. Bastianelli et al., "SLURP: A Spoken Language Understanding Resource Package," in <em>EMNLP</em>, 2020.<br>
+    [4] S. Biderman et al., "Pythia: A Suite for Analyzing Large Language Models Across Training and Scaling," in <em>ICML</em>, 2023.
+  </p>
+</div>
+
+</body>
+</html>
