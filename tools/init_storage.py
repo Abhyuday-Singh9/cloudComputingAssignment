@@ -21,11 +21,11 @@ def init_s3():
     existing_buckets = [b['Name'] for b in s3.list_buckets().get('Buckets', [])]
     
     for b in required_buckets:
-        if b not in existing_buckets:
+        try:
             s3.create_bucket(Bucket=b)
             print(f"Created bucket: {b}")
-        else:
-            print(f"Bucket already exists: {b}")
+        except Exception as e:
+            print(f"Bucket {b} already exists or error: {e}")
 
     # 2. Upload commands_pool.jsonl
     pool_path = "data/commands_pool.jsonl"
@@ -43,3 +43,4 @@ def init_s3():
 
 if __name__ == '__main__':
     init_s3()
+

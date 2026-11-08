@@ -8,3 +8,4 @@ ports:
   - port: 8080:80
     nodeFilters:
       - loadbalancer
+

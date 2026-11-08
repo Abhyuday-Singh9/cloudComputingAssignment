@@ -6,6 +6,7 @@ import requests
 import boto3
 from botocore.client import Config
 
+
 def get_s3_client():
     s3_endpoint = os.environ.get("S3_ENDPOINT", "http://seaweedfs.data.svc.cluster.local:8333")
     aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID", "cloudadmin")
@@ -20,6 +21,7 @@ def get_s3_client():
         region_name='us-east-1'
     )
 
+
 def load_prompt():
     prompt_path = os.environ.get("PROMPT_PATH", "teacher_prompt.txt")
     if not os.path.exists(prompt_path):
@@ -27,10 +29,11 @@ def load_prompt():
     with open(prompt_path, "r", encoding="utf-8") as f:
         return f.read().strip()
 
+
 def main():
     shard_index_str = os.environ.get("SHARD_INDEX")
     shard_count_str = os.environ.get("SHARD_COUNT")
-    
+
     if shard_index_str is None or shard_count_str is None:
         sys.exit("Error: SHARD_INDEX and SHARD_COUNT environment variables are required.")
 
@@ -45,9 +48,9 @@ def main():
     system_prompt = load_prompt()
 
     # 1. Download commands_pool.jsonl from S3
-    local_pool_file = f"/tmp/commands_pool.jsonl"
+    local_pool_file = "/tmp/commands_pool.jsonl"
     os.makedirs("/tmp", exist_ok=True)
-    
+
     try:
         s3.download_file("datasets", "commands_pool.jsonl", local_pool_file)
         print("Downloaded commands_pool.jsonl from datasets bucket.")
@@ -55,16 +58,28 @@ def main():
         # Fallback to local if running outside cluster
         if os.path.exists("data/commands_pool.jsonl"):
             local_pool_file = "data/commands_pool.jsonl"
-            print("Using local data/commands_pool.jsonl fallback.")
+            print("Using local data/commands_pool.jsonl.")
         else:
-            sys.exit(f"Failed to obtain commands_pool.jsonl: {e}")
+            raise e
 
-    # 2. Check for existing partial shard in S3 for resumability
+    # 2. Read all commands
+    all_commands = []
+    with open(local_pool_file, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                all_commands.append(json.loads(line))
+
+    # 3. Filter for this shard: index % SHARD_COUNT == SHARD_INDEX
+    shard_commands = [
+        cmd for i, cmd in enumerate(all_commands)
+        if i % shard_count == shard_index
+    ]
+
     shard_s3_key = f"teacher/shard-{shard_index}.jsonl"
     local_shard_file = f"/tmp/shard-{shard_index}.jsonl"
-    processed_ids = set()
-    existing_records = []
 
+    # 4. Check for existing progress in S3 to resume
+    processed_ids = set()
     try:
         s3.download_file("datasets", shard_s3_key, local_shard_file)
         with open(local_shard_file, "r", encoding="utf-8") as f:
@@ -72,53 +87,48 @@ def main():
                 if line.strip():
                     item = json.loads(line)
                     processed_ids.add(item["id"])
-                    existing_records.append(item)
-        print(f"Resuming: found {len(processed_ids)} already labelled items in S3.")
+        print(f"Resuming shard {shard_index}: found {len(processed_ids)} already processed records in S3.")
     except Exception:
         print("No prior shard file found in S3. Starting fresh.")
-
-    # 3. Read pool lines and filter shard
-    shard_commands = []
-    with open(local_pool_file, "r", encoding="utf-8") as f:
-        for line_num, line in enumerate(f):
-            if not line.strip():
-                continue
-            if line_num % shard_count == shard_index:
-                shard_commands.append(json.loads(line))
+        if os.path.exists(local_shard_file):
+            os.remove(local_shard_file)
 
     print(f"Total commands assigned to this shard: {len(shard_commands)} (already processed: {len(processed_ids)})")
 
-    # 4. Open shard file for append
-    with open(local_shard_file, "a" if processed_ids else "w", encoding="utf-8") as out_f:
-        for idx, cmd in enumerate(shard_commands):
+    # 5. Process remaining commands
+    with open(local_shard_file, "a", encoding="utf-8") as out_f:
+        for cmd in shard_commands:
             cmd_id = cmd["id"]
             if cmd_id in processed_ids:
                 continue
 
             text = cmd["text"]
-            full_prompt = f"{system_prompt}\n\nCommand: {text}\nJSON:"
+            # Call Ollama API
+            payload = {
+                "model": "phi3.5:latest",
+                "prompt": f"Command: {text}\nJSON:",
+                "system": system_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0,
+                    "seed": 42,
+                    "num_predict": 64,
+                    "stop": ["\n"]
+                }
+            }
 
-            # Query Ollama
             teacher_raw = ""
-            for attempt in range(5):
+            for attempt in range(3):
                 try:
-                    resp = requests.post(f"{ollama_host}/api/generate", json={
-                        "model": "phi3.5",
-                        "prompt": full_prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0,
-                            "seed": 42
-                        }
-                    }, timeout=120)
+                    resp = requests.post(f"{ollama_host}/api/generate", json=payload, timeout=120)
                     if resp.status_code == 200:
                         teacher_raw = resp.json().get("response", "").strip()
                         break
                     else:
-                        print(f"HTTP {resp.status_code} from Ollama on attempt {attempt+1}, retrying...")
+                        print(f"HTTP {resp.status_code} from Ollama on attempt {attempt + 1}, retrying...")
                         time.sleep(2)
                 except Exception as ex:
-                    print(f"Error querying Ollama on attempt {attempt+1}: {ex}")
+                    print(f"Error querying Ollama on attempt {attempt + 1}: {ex}")
                     time.sleep(3)
 
             record = {
@@ -138,6 +148,7 @@ def main():
     # Final upload
     s3.upload_file(local_shard_file, "datasets", shard_s3_key)
     print(f"Shard {shard_index} completed successfully! Uploaded to s3://datasets/{shard_s3_key}")
+
 
 if __name__ == "__main__":
     main()

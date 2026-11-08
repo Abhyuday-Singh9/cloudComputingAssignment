@@ -25,6 +25,7 @@ spec:
             - -s3
             - -s3.port=8333
             - -filer=true
+            - -volume.max=100
           ports:
             - name: s3
               containerPort: 8333
@@ -67,3 +68,4 @@ spec:
     - name: master
       port: 9333
       targetPort: 9333
+

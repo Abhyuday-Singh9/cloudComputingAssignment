@@ -1,0 +1,30 @@
+=== Task 3 / Task 7.3: Service Resource Limit Verification ===
+
+1. Container Execution:
+Command: docker run -d --name svc --cpus=1 --memory=1g -p 8000:8000 -v "${PWD}/models/untrained:/app/model" -e MODEL_URI=/app/model -e MODEL_VERSION=v1 -e MAX_NEW_TOKENS=64 service:v1
+Container ID: 2cf4585537b91de11b4e6bf8c9ebebbba67b35353f09bd363bea3c6e2e61ee51
+
+2. Health & Readiness Probes:
+GET /healthz -> HTTP 200 OK {"status":"alive"}
+GET /readyz (during load) -> HTTP 503 Service Unavailable {"status":"loading"}
+GET /readyz (post load)   -> HTTP 200 OK {"status":"ready"}
+
+3. Inference & Downward API Headers:
+POST /parse {"text": "what is the weather today"}
+HTTP 500 Internal Server Error (Untrained base model returns non-JSON raw tokens, correctly handled)
+Response Headers:
+  x-model-version: v1
+  x-served-by: 2cf4585537b9
+
+4. Resource Utilization (docker stats --no-stream):
+CONTAINER ID   NAME      CPU %     MEM USAGE / LIMIT   MEM %     NET I/O           BLOCK I/O        PIDS
+2cf4585537b9   svc       0.23%     623.4MiB / 1GiB     60.88%    7.87kB / 6.26kB   218MB / 1.21MB   17
+
+5. OOM Status (docker inspect svc --format '{{json .State}}'):
+Status: running
+ExitCode: 0
+OOMKilled: false
+Error: None
+
+Result: PASS (Memory usage strictly within 1 GiB limit, 0 OOM kills observed).
+

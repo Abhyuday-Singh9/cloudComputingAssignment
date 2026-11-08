@@ -21,3 +21,4 @@ k8s/secret.yaml
 
 # large local data
 *.log
+worker/shards/

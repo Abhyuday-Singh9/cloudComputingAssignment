@@ -11,3 +11,4 @@ COPY teacher_prompt.txt .
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "worker.py"]
+
