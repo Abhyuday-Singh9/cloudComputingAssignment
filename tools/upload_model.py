@@ -61,22 +61,34 @@ def main():
 
     # 2. Upload individual files to s3://models/<version>/
     t_config = TransferConfig(
-        multipart_threshold=250 * 1024 * 1024,
+        multipart_threshold=500 * 1024 * 1024,
         max_concurrency=1,
         use_threads=False
     )
-    print(f"Uploading model files from {model_dir} to s3://models/{version}/...")
+
+    def upload_if_needed(file_path: str, bucket: str, key: str):
+        file_size = os.path.getsize(file_path)
+        try:
+            head = s3.head_object(Bucket=bucket, Key=key)
+            if head.get("ContentLength") == file_size:
+                print(f"  {key} already uploaded ({file_size} bytes), skipping.", flush=True)
+                return
+        except Exception:
+            pass
+        print(f"  Uploading {os.path.basename(file_path)} ({file_size} bytes) -> s3://{bucket}/{key}", flush=True)
+        s3.upload_file(file_path, bucket, key, Config=t_config)
+
+    print(f"Uploading model files from {model_dir} to s3://models/{version}/...", flush=True)
     for fname in sorted(os.listdir(model_dir)):
         full_path = os.path.join(model_dir, fname)
         if os.path.isfile(full_path):
             s3_key = f"{version}/{fname}"
-            print(f"  Uploading {fname} -> s3://models/{s3_key}")
-            s3.upload_file(full_path, "models", s3_key, Config=t_config)
+            upload_if_needed(full_path, "models", s3_key)
 
     # 3. Upload archive and sha to S3 as well
-    s3.upload_file(archive_path, "models", f"{version}/model-{version}.zip", Config=t_config)
-    s3.upload_file(sha_path, "models", f"{version}/model.sha256", Config=t_config)
-    print(f"Model version {version} upload completed successfully.")
+    upload_if_needed(archive_path, "models", f"{version}/model-{version}.zip")
+    upload_if_needed(sha_path, "models", f"{version}/model.sha256")
+    print(f"Model version {version} upload completed successfully.", flush=True)
 
 
 if __name__ == "__main__":

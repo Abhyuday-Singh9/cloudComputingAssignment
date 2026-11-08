@@ -2,6 +2,7 @@ import os
 import boto3
 from botocore.client import Config
 
+
 def init_s3():
     endpoint_url = os.environ.get("S3_ENDPOINT", "http://127.0.0.1:8333")
     aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID", "cloudadmin")
@@ -18,8 +19,7 @@ def init_s3():
 
     # 1. Create buckets
     required_buckets = ['datasets', 'models']
-    existing_buckets = [b['Name'] for b in s3.list_buckets().get('Buckets', [])]
-    
+
     for b in required_buckets:
         try:
             s3.create_bucket(Bucket=b)
@@ -41,6 +41,6 @@ def init_s3():
     keys = [item['Key'] for item in resp.get('Contents', [])]
     print(f"Objects in 'datasets' bucket: {keys}")
 
+
 if __name__ == '__main__':
     init_s3()
-

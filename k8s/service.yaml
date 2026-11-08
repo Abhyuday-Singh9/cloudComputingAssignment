@@ -104,7 +104,7 @@ spec:
   rules:
     - http:
         paths:
-          - path: /parse
+          - path: /
             pathType: Prefix
             backend:
               service:

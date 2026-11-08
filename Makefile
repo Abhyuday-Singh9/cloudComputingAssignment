@@ -12,13 +12,16 @@ train:
 	python training/train.py --config training/config.yaml $(if $(SUBSET),--subset $(SUBSET),)
 
 test:
+	python tools/nacl_sim.py network/nacl.json network/packets_sample.jsonl --check
 	python -m pytest tests/
 
 lint:
-	python -m flake8 service/ worker/ training/ tests/ || python -m ruff check service/ worker/ training/ tests/
+	python -m flake8 service/ tests/ tools/
 
 up:
-	@echo "Deploying system..."
+	kubectl apply -f k8s/namespaces.yaml
+	kubectl apply -f k8s/seaweedfs.yaml
+	kubectl apply -f k8s/service.yaml
 
 down:
 	k3d cluster delete cloud-cluster || true

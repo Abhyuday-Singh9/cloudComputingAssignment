@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pytest fastapi pydantic uvicorn httpx
+
+      - name: Lint with Flake8
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 service/ tests/ tools/ --max-line-length=120 --statistics
+
+      - name: Run NACL Stateless Firewall Simulation
+        run: |
+          python tools/nacl_sim.py network/nacl.json network/packets_sample.jsonl --check
+
+      - name: Run Service Unit Tests
+        run: |
+          pytest tests/test_service.py -v
+
+      - name: Verify Evaluation Scores
+        run: |
+          python -c "import json; data = json.load(open('results/student_validation.json')); assert data['json_validity'] >= 80.0, f'Low JSON validity: {data[\"json_validity\"]}%'; print('Evaluation threshold PASSED: JSON validity =', data['json_validity'])"
